@@ -1,129 +1,423 @@
-# CICD Test - Company Watch
+# CI/CD Test - Company Watch Technical Assessment
 
-## Solution Overview
+## Overview
 
-This solution implements a CI/CD pipeline for deploying a containerised Python application to Google Cloud Run with separate staging and production environments.
+This solution implements a complete CI/CD pipeline for deploying a containerised Python application to Google Cloud Run with separate staging and production environments.
 
 ## Architecture
-```
-GitHub (cicd-test repo)
-  ├── Push to master → Cloud Build → Deploy to staging
-  └── Create release tag → Cloud Build → Deploy to production
-```
 
-### Infrastructure Components
+GitHub Repository (cicd-test)
+│
+├── Push to main branch
+│   └─> Cloud Build Trigger (deploy-staging)
+│       └─> Build Docker image
+│           └─> Push to Artifact Registry
+│               └─> Deploy to Cloud Run (staging)
+│
+└── Create GitHub Release/Tag
+    └─> Cloud Build Trigger (deploy-production)
+        └─> Build Docker image
+            └─> Push to Artifact Registry
+                └─> Deploy to Cloud Run (production)
 
-- **Artifact Registry**: Stores Docker images
-- **Cloud Run (Staging)**: `cicd-test-staging` service
-- **Cloud Run (Production)**: `cicd-test-production` service
-- **Cloud Build**: Automated CI/CD pipelines
-- **Service Accounts**: Least-privilege IAM for deployments
+## Infrastructure Components
+
+### Core Resources (Managed by Terraform)
+- **Artifact Registry**: Docker image repository (`cw-cicd-test`)
+- **Cloud Run Services**: 
+  - `cw-cicd-test-staging` (authentication required)
+  - `cw-cicd-test-production` (public access)
+- **Service Account**: `cloudbuild-sa` with least-privilege IAM roles
+- **IAM Bindings**: Permissions for Cloud Build to deploy
+
+### CI/CD Resources (Configured Manually)
+- **Cloud Build Triggers**:
+  - `deploy-staging`: Triggers on push to `main` branch
+  - `deploy-production`: Triggers on tag creation
 
 ## Deployment Flow
 
-### Staging
-1. Developer merges to `master` branch
-2. Cloud Build trigger fires automatically
-3. Builds Docker image and pushes to Artifact Registry
-4. Deploys to Cloud Run staging environment
+### Staging Deployment
+1. Developer pushes code to `main` branch
+2. Cloud Build trigger (`deploy-staging`) fires automatically
+3. Cloud Build executes `cloudbuild.yaml`:
+   - Builds Docker image
+   - Tags as `:staging` and `:$SHORT_SHA`
+   - Pushes to Artifact Registry
+   - Deploys to `cw-cicd-test-staging` Cloud Run service
+4. New version is live in staging environment
 
-### Production
-1. Create a GitHub release/tag (e.g., `v1.0.0`)
-2. Cloud Build production trigger fires
-3. Builds Docker image with release tag
-4. Deploys to Cloud Run production environment
+### Production Deployment
+1. Create a GitHub release or tag (e.g., `v1.0.0`)
+2. Cloud Build trigger (`deploy-production`) fires automatically
+3. Cloud Build executes `cloudbuild.yaml`:
+   - Builds Docker image
+   - Tags as `:production` and `:$SHORT_SHA`
+   - Pushes to Artifact Registry
+   - Deploys to `cw-cicd-test-production` Cloud Run service
+4. New version is live in production environment
+
+## Security & Access Control
+
+### Staging Environment
+Access: Restricted (authentication required)
+
+- Not publicly accessible
+- Requires Google Cloud authentication with `roles/run.invoker` permission
+- Only internal team members can access
+- Access method: `gcloud run services proxy cw-cicd-test-staging --region=europe-west2`
+
+**Production Best Practices:**
+In a real environment, staging would additionally be restricted by:
+- IP allowlist (office IPs or VPN only)
+- Bastion host access through VPC
+- Cloud Armor WAF with IP-based security policies
+- VPC-internal ingress settings
+
+### Production Environment
+Access: Public (accessible to all users)
+
+- Directly accessible via Cloud Run URL
+- No authentication required
+- Intended for end-user access
 
 ## Setup Instructions
 
 ### Prerequisites
 - GCP project with billing enabled
-- GitHub account with forked repository
+- GitHub account with repository access
 - `gcloud` CLI installed and authenticated
-- Terraform installed
+- Terraform >= 1.0 installed
+- Docker installed locally
 
 ### 1. Enable Required APIs
 ```bash
 gcloud services enable \
   cloudbuild.googleapis.com \
   run.googleapis.com \
-  artifactregistry.googleapis.com
+  artifactregistry.googleapis.com \
+  iam.googleapis.com \
+  compute.googleapis.com
 ```
 
-### 2. Connect GitHub to Cloud Build
-
-1. Go to Cloud Console → Cloud Build → Triggers
-2. Click "Connect Repository"
-3. Authenticate with GitHub
-4. Select your forked `cicd-test` repository
-
-### 3. Deploy Infrastructure with Terraform
+### 2. Configure Terraform Variables
 ```bash
 cd terraform
 
-# Update terraform.tfvars with your values
-# Then:
-
-terraform init
-terraform apply
+# Create terraform.tfvars
+cat > terraform.tfvars << EOF
+project_id   = "YOUR_GCP_PROJECT_ID"
+region       = "europe-west2"
+github_owner = "YOUR_GITHUB_USERNAME"
+github_repo  = "cicd-test"
+EOF
 ```
 
-### 4. Bootstrap Initial Images
+### 3. Deploy Infrastructure with Terraform
 ```bash
-# Authenticate Docker
+# Initialise Terraform
+terraform init
+
+# Review planned changes
+terraform plan
+
+# Apply infrastructure
+terraform apply (This will fail on first run due to git connection not being configured)
+```
+
+### 4. Connect GitHub to Cloud Build
+
+1. Navigate to [Cloud Build → Triggers](https://console.cloud.google.com/cloud-build/triggers)
+2. Click "Connect Repository"
+3. Select "GitHub (Cloud Build GitHub App)"
+4. Authenticate and install the Google Cloud Build app
+5. Select your `cicd-test` repository
+6. Complete the connection (skip trigger creation)
+7. Rerun terrafrom apply (step 3)
+
+### 5. Build and Push Initial Images
+```bash
+# Return to repository root
+cd ..
+
+# Authenticate Docker to Artifact Registry
 gcloud auth configure-docker europe-west2-docker.pkg.dev
 
-# Build and push initial images
-docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:staging .
-docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:staging
+# Build images with tags
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:staging .
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:production .
 
-docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:production .
-docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:production
-
-# Re-apply Terraform
-terraform apply
+# Push to Artifact Registry
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:staging
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:production
 ```
+
+### 6. Create Cloud Build Triggers
+
+**Navigate to:** [Cloud Build → Triggers](https://console.cloud.google.com/cloud-build/triggers)
+
+**Create Staging Trigger:**
+- Name: `deploy-staging`
+- Event: Push to a branch
+- Repository: `cicd-test`
+- Branch: `^main$`
+- Configuration: Cloud Build configuration file (`cloudbuild.yaml`)
+- Substitution variables:
+  - `_ENVIRONMENT` = `staging`
+  - `_REGION` = `europe-west2`
+- Service account: `cloudbuild-sa@PROJECT_ID.iam.gserviceaccount.com`
+
+**Create Production Trigger:**
+- Name: `deploy-production`
+- Event: Push new tag
+- Repository: `cicd-test`
+- Tag: `.*`
+- Configuration: Cloud Build configuration file (`cloudbuild.yaml`)
+- Substitution variables:
+  - `_ENVIRONMENT` = `production`
+  - `_REGION` = `europe-west2`
+- Service account: `cloudbuild-sa@PROJECT_ID.iam.gserviceaccount.com`
 
 ## Testing Deployments
 
-### Test Staging
+### Test Staging Deployment
 ```bash
-git commit -m "Test change" --allow-empty
-git push origin master
+# Make a code change
+echo "# Test change" >> README.md
+
+# Commit and push to main
+git add README.md
+git commit -m "Test staging deployment"
+git push origin main
+
+# Watch build progress
+gcloud builds list --limit=1
+
+# Access staging (requires authentication)
+gcloud run services proxy cw-cicd-test-staging --region=europe-west2
+# Visit http://localhost:8080
 ```
 
-### Test Production
+### Test Production Deployment
 ```bash
+# Create and push a release tag
 git tag v1.0.0
 git push origin v1.0.0
+
+# Watch build progress
+gcloud builds list --limit=1
+
+# Access production (public)
+gcloud run services describe cw-cicd-test-production \
+  --region=europe-west2 \
+  --format='value(status.url)'
 ```
 
-## Live URLs
+## Service URLs
 
-- **Staging**: [Your staging URL from terraform output]
-- **Production**: [Your production URL from terraform output]
+Get the deployed URLs:
+```bash
+# Staging (requires authentication)
+terraform output staging_url
 
-## Challenges & Solutions
+# Production (public)
+terraform output production_url
+```
 
-### Challenge 1: GitHub Cloud Build Connection
-**Issue**: Terraform Cloud Build triggers require GitHub app connection.
-**Solution**: Connected GitHub manually via Cloud Console before applying Terraform triggers.
+## Technical Decisions, Trade-offs and Issues
 
-### Challenge 2: Initial Image Bootstrap
-**Issue**: Cloud Run services reference images that don't exist on first deploy.
-**Solution**: Used Terraform `lifecycle.ignore_changes` for image attribute and manually built/pushed initial images before applying.
+### Infrastructure as Code with Terraform
 
-### Challenge 3: IAM Permissions
-**Issue**: Cloud Build needs multiple permissions (Cloud Run, Artifact Registry, Service Account).
-**Solution**: Created dedicated service account with least-privilege IAM roles.
+Decision: Manage core infrastructure (Artifact Registry, Cloud Run, IAM) with Terraform
 
-## With More Time, I Would Add
+**Rationale:**
+- Version-controlled infrastructure
+- Repeatable and consistent deployments
+- Self-documenting infrastructure
+- Easy to modify and maintain
 
-- **Remote state backend**: Store Terraform state in GCS bucket
-- **Terraform modules**: Create reusable modules for Cloud Run services
-- **Environment-specific configs**: Different resource sizes for staging vs. production
-- **Monitoring**: Cloud Monitoring dashboards and alerts
-- **Secret management**: Use Secret Manager for sensitive config
-- **Custom domains**: Map custom domains to Cloud Run services
-- **Rollback mechanism**: Automated rollback on deployment failure
-- **Integration tests**: Run tests before deploying to production
-- **Cost optimization**: Set CPU/memory limits, min/max instances
+### Cloud Build Triggers - Manual Configuration
+
+Decision: Created triggers manually via Cloud Console instead of Terraform
+
+**Rationale:**
+- GitHub App connection complexity in Terraform
+- Time constraint (2-hour assignment)
+- Pragmatic trade-off for demonstration
+
+**Production Approach:**
+- Use Terraform's v2 trigger API with connection resources
+- Or create triggers programmatically via `gcloud` CLI
+- Ensure all infrastructure is code-defined
+
+### Deployment Trigger Strategy
+
+Staging: Push to `main` branch
+
+Current: Triggers on any push to main (includes direct pushes and PR merges)
+
+**Production Best Practice:**
+- Enable branch protection on `main`
+- Require pull requests for all changes
+- Trigger would then only fire on PR merges
+- Current approach chosen for easier testing
+
+Production: GitHub release/tag creation
+
+- Controlled production releases
+- Clear versioning (v1.0.0, v1.1.0, etc.)
+- Allows for release notes and change tracking
+
+### Cloud Run vs. GKE
+
+Decision: Use Cloud Run instead of Google Kubernetes Engine
+
+**Rationale:**
+- Simpler for stateless applications
+- Fully managed (no cluster management overhead)
+- Pay-per-use pricing (cost-effective)
+- Automatic scaling to zero
+- Sufficient for this use case
+
+**When to use GKE instead:**
+- Complex microservices architecture (10+ services)
+- Need advanced networking (service mesh, ingress complexity)
+- Stateful workloads requiring persistent storage
+- Team has Kubernetes expertise and requirements justify overhead
+
+### Staging Access Control
+
+Decision: Remove public access from staging, require authentication
+
+**Rationale:**
+- Meets requirement: "only accessible by internal users"
+- Simple implementation without VPC/Load Balancer complexity
+- Users with appropriate IAM roles can access via `gcloud proxy`
+
+**Production Enhancement Options:**
+- IP allowlist via Cloud Armor (requires Load Balancer)
+- VPC-internal ingress (requires VPC and bastion host)
+- Corporate VPN requirement
+
+**Trade-off:** Chose authentication-based access for simplicity within time constraint
+
+### Port Configuration
+
+**Decision:** Configure Cloud Run to listen on port 8000
+
+**Rationale:**
+- Application's `server.py` binds to port 8000
+- Cloud Run defaults to port 8080
+- Explicit port configuration in `cloudbuild.yaml` ensures compatibility
+
+## Challenges Encountered
+
+### 1. Cloud Build GitHub Integration
+
+**Issue:** Terraform's Cloud Build trigger resources require pre-configured GitHub App connection
+
+**Solution:** Manually connected GitHub repository via Cloud Console before creating triggers
+
+**Learning:** GitHub App connections are managed separately from Terraform resources
+
+### 2. Initial Image Bootstrap
+
+**Issue:** Cloud Run services reference container images that don't exist on first deployment
+
+**Solution:**
+- Used Terraform `lifecycle.ignore_changes` for image attribute
+- Manually built and pushed initial images before Terraform apply
+- Allows Cloud Build to update images without Terraform conflicts
+
+**Alternative Approaches:**
+- Use `depends_on` with Cloud Build to create images first
+- Pre-build images in separate pipeline before infrastructure deployment
+
+## What I Would Add With More Time
+
+### Infrastructure Improvements
+
+- Remote State Backend: Store Terraform state in GCS bucket with locking
+- Terraform Modules: Create reusable modules for Cloud Run services
+- Environment-Specific Configurations: Different CPU/memory allocations per environment
+- Custom Domains: Map custom domains to Cloud Run services
+- SSL Certificates: Automated certificate management
+
+### Security Enhancements
+
+- Secret Management: Use Secret Manager for sensitive configuration
+- VPC Configuration: Deploy Cloud Run with VPC connector for private networking
+- Cloud Armor: IP-based access control for staging environment
+- Workload Identity: Enhanced service account security
+- Vulnerability Scanning: Automated container image scanning
+
+### Operational Improvements
+
+- Monitoring & Alerting:
+  - Cloud Monitoring dashboards
+  - Uptime checks and SLO monitoring
+  - Error rate and latency alerts
+  - Log-based metrics
+
+- Logging:
+  - Structured logging in application
+  - Log aggregation and analysis
+  - Audit logging for deployments
+
+- Rollback Mechanism:
+  - Automated rollback on deployment failure
+  - Traffic splitting for gradual rollouts
+  - Blue-green deployment strategy
+
+### CI/CD Enhancements
+
+- Automated Testing:
+  - Unit tests in Cloud Build pipeline
+  - Integration tests before staging deployment
+  - Smoke tests after deployment
+  - Load testing for production releases
+
+- Build Optimisation:
+  - Multi-stage Docker builds for smaller images
+  - Layer caching for faster builds
+  - Parallel build steps
+
+- Deployment Gates:
+  - Manual approval for production deployments
+  - Automated security scanning
+  - Performance benchmarking
+
+### Developer Experience
+
+- Local Development:
+  - Docker Compose for local testing
+  - Skaffold for local Kubernetes development
+  - Environment parity between local and deployed
+
+- Documentation:
+  - Architecture diagrams (draw.io, Lucidchart)
+  - Runbook for common operations
+  - Troubleshooting guide
+  - Contributing guidelines
+
+## Project Structure
+```
+cicd-test/
+├── app/                    # Python application code
+├── terraform/              # Infrastructure as Code
+│   ├── main.tf            # Core infrastructure resources
+│   ├── variables.tf       # Input variables
+│   ├── outputs.tf         # Output values
+│   └── terraform.tfvars   # Variable values (not committed)
+├── cloudbuild.yaml        # CI/CD pipeline configuration
+├── Dockerfile             # Container image definition
+├── .gitignore            # Git ignore patterns
+└── README.md             # This file
+```
+
+## Resources
+
+- [Google Cloud Run Documentation](https://cloud.google.com/run/docs)
+- [Cloud Build Documentation](https://cloud.google.com/build/docs)
+- [Terraform Google Provider](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+- [Artifact Registry Documentation](https://cloud.google.com/artifact-registry/docs)
