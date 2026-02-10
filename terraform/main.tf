@@ -94,12 +94,12 @@ resource "google_cloud_run_service" "production" {
 }
 
 # IAM - Allow public access to staging
-resource "google_cloud_run_service_iam_member" "staging_public" {
-  service  = google_cloud_run_service.staging.name
-  location = google_cloud_run_service.staging.location
-  role     = "roles/run.invoker"
-  member   = "allUsers"
-}
+#resource "google_cloud_run_service_iam_member" "staging_public" {
+#  service  = google_cloud_run_service.staging.name
+#  location = google_cloud_run_service.staging.location
+#  role     = "roles/run.invoker"
+#  member   = "allUsers"
+#}
 
 # IAM - Allow public access to production
 resource "google_cloud_run_service_iam_member" "production_public" {
@@ -147,7 +147,7 @@ resource "google_project_iam_member" "cloudbuild_artifact_writer" {
 #    owner = var.github_owner
 #    name  = var.github_repo
 #    push {
-#      branch = "^master$"
+#      branch = "^main$"
 #    }
 #  }
 #
@@ -171,7 +171,7 @@ resource "google_project_iam_member" "cloudbuild_artifact_writer" {
 #    owner = var.github_owner
 #    name  = var.github_repo
 #    push {
-#      tag = ".*"  # Any tag triggers production deploy
+#      tag = "^v.*"  
 #    }
 #  }
 #
