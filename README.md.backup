@@ -1,0 +1,129 @@
+# CICD Test - Company Watch
+
+## Solution Overview
+
+This solution implements a CI/CD pipeline for deploying a containerised Python application to Google Cloud Run with separate staging and production environments.
+
+## Architecture
+```
+GitHub (cicd-test repo)
+  ├── Push to master → Cloud Build → Deploy to staging
+  └── Create release tag → Cloud Build → Deploy to production
+```
+
+### Infrastructure Components
+
+- **Artifact Registry**: Stores Docker images
+- **Cloud Run (Staging)**: `cicd-test-staging` service
+- **Cloud Run (Production)**: `cicd-test-production` service
+- **Cloud Build**: Automated CI/CD pipelines
+- **Service Accounts**: Least-privilege IAM for deployments
+
+## Deployment Flow
+
+### Staging
+1. Developer merges to `master` branch
+2. Cloud Build trigger fires automatically
+3. Builds Docker image and pushes to Artifact Registry
+4. Deploys to Cloud Run staging environment
+
+### Production
+1. Create a GitHub release/tag (e.g., `v1.0.0`)
+2. Cloud Build production trigger fires
+3. Builds Docker image with release tag
+4. Deploys to Cloud Run production environment
+
+## Setup Instructions
+
+### Prerequisites
+- GCP project with billing enabled
+- GitHub account with forked repository
+- `gcloud` CLI installed and authenticated
+- Terraform installed
+
+### 1. Enable Required APIs
+```bash
+gcloud services enable \
+  cloudbuild.googleapis.com \
+  run.googleapis.com \
+  artifactregistry.googleapis.com
+```
+
+### 2. Connect GitHub to Cloud Build
+
+1. Go to Cloud Console → Cloud Build → Triggers
+2. Click "Connect Repository"
+3. Authenticate with GitHub
+4. Select your forked `cicd-test` repository
+
+### 3. Deploy Infrastructure with Terraform
+```bash
+cd terraform
+
+# Update terraform.tfvars with your values
+# Then:
+
+terraform init
+terraform apply
+```
+
+### 4. Bootstrap Initial Images
+```bash
+# Authenticate Docker
+gcloud auth configure-docker europe-west2-docker.pkg.dev
+
+# Build and push initial images
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:staging .
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:staging
+
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:production .
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cicd-test/app:production
+
+# Re-apply Terraform
+terraform apply
+```
+
+## Testing Deployments
+
+### Test Staging
+```bash
+git commit -m "Test change" --allow-empty
+git push origin master
+```
+
+### Test Production
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+## Live URLs
+
+- **Staging**: [Your staging URL from terraform output]
+- **Production**: [Your production URL from terraform output]
+
+## Challenges & Solutions
+
+### Challenge 1: GitHub Cloud Build Connection
+**Issue**: Terraform Cloud Build triggers require GitHub app connection.
+**Solution**: Connected GitHub manually via Cloud Console before applying Terraform triggers.
+
+### Challenge 2: Initial Image Bootstrap
+**Issue**: Cloud Run services reference images that don't exist on first deploy.
+**Solution**: Used Terraform `lifecycle.ignore_changes` for image attribute and manually built/pushed initial images before applying.
+
+### Challenge 3: IAM Permissions
+**Issue**: Cloud Build needs multiple permissions (Cloud Run, Artifact Registry, Service Account).
+**Solution**: Created dedicated service account with least-privilege IAM roles.
+
+## With More Time, I Would Add
+
+- **Remote state backend**: Store Terraform state in GCS bucket
+- **Terraform modules**: Create reusable modules for Cloud Run services
+- **Environment-specific configs**: Different resource sizes for staging vs. production
+- **Monitoring**: Cloud Monitoring dashboards and alerts
+- **Secret management**: Use Secret Manager for sensitive config
+- **Custom domains**: Map custom domains to Cloud Run services
+- **Rollback mechanism**: Automated rollback on deployment failure
+- **Integration tests**: Run tests before deploying to production
+- **Cost optimization**: Set CPU/memory limits, min/max instances
