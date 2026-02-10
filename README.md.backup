@@ -23,10 +23,10 @@ GitHub Repository (cicd-test)
 ## Infrastructure Components
 
 ### Core Resources (Managed by Terraform)
-- **Artifact Registry**: Docker image repository (`cw-cicd-test`)
+- **Artifact Registry**: Docker image repository (`$project_id`)
 - **Cloud Run Services**: 
-  - `cw-cicd-test-staging` (authentication required)
-  - `cw-cicd-test-production` (public access)
+  - `$project_id-staging` (authentication required)
+  - `$project_id-production` (public access)
 - **Service Account**: `cloudbuild-sa` with least-privilege IAM roles
 - **IAM Bindings**: Permissions for Cloud Build to deploy
 
@@ -44,7 +44,7 @@ GitHub Repository (cicd-test)
    - Builds Docker image
    - Tags as `:staging` and `:$SHORT_SHA`
    - Pushes to Artifact Registry
-   - Deploys to `cw-cicd-test-staging` Cloud Run service
+   - Deploys to `$project_id-staging` Cloud Run service
 4. New version is live in staging environment
 
 ### Production Deployment
@@ -54,7 +54,7 @@ GitHub Repository (cicd-test)
    - Builds Docker image
    - Tags as `:production` and `:$SHORT_SHA`
    - Pushes to Artifact Registry
-   - Deploys to `cw-cicd-test-production` Cloud Run service
+   - Deploys to `$project_id-test-production` Cloud Run service
 4. New version is live in production environment
 
 ## Security & Access Control
@@ -65,7 +65,7 @@ Access: Restricted (authentication required)
 - Not publicly accessible
 - Requires Google Cloud authentication with `roles/run.invoker` permission
 - Only internal team members can access
-- Access method: `gcloud run services proxy cw-cicd-test-staging --region=europe-west2`
+- Access method: `gcloud run services proxy $project_id-staging --region=europe-west2`
 
 **Production Best Practices:**
 In a real environment, staging would additionally be restricted by:
@@ -144,12 +144,12 @@ cd ..
 gcloud auth configure-docker europe-west2-docker.pkg.dev
 
 # Build images with tags
-docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:staging .
-docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:production .
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/$repo_name/app:staging .
+docker build -t europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/$repo_name/app:production .
 
 # Push to Artifact Registry
-docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:staging
-docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/cw-cicd-test/app:production
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/$repo_name/app:staging
+docker push europe-west2-docker.pkg.dev/YOUR_PROJECT_ID/$repo_name/app:production
 ```
 
 ### 6. Create Cloud Build Triggers
@@ -194,7 +194,7 @@ git push origin main
 gcloud builds list --limit=1
 
 # Access staging (requires authentication)
-gcloud run services proxy cw-cicd-test-staging --region=europe-west2
+gcloud run services proxy $project_id-staging --region=europe-west2
 # Visit http://localhost:8080
 ```
 
@@ -208,7 +208,7 @@ git push origin v1.0.0
 gcloud builds list --limit=1
 
 # Access production (public)
-gcloud run services describe cw-cicd-test-production \
+gcloud run services describe $project_id-production \
   --region=europe-west2 \
   --format='value(status.url)'
 ```
