@@ -268,7 +268,7 @@ Production: GitHub release/tag creation
 - Clear versioning (v1.0.0, v1.1.0, etc.)
 - Allows for release notes and change tracking
 
-### Cloud Run vs. GKE
+### Cloud Run vs. GKE vs VM
 
 Decision: Use Cloud Run instead of Google Kubernetes Engine
 
@@ -279,11 +279,11 @@ Decision: Use Cloud Run instead of Google Kubernetes Engine
 - Automatic scaling to zero
 - Sufficient for this use case
 
-**When to use GKE instead:**
+**When to use GKE/VM instead:**
 - Complex microservices architecture (10+ services)
+- Need to save state (attach storage to VM)
 - Need advanced networking (service mesh, ingress complexity)
 - Stateful workloads requiring persistent storage
-- Team has Kubernetes expertise and requirements justify overhead
 
 ### Staging Access Control
 
